@@ -2,6 +2,7 @@
 
 import csv
 import math
+import operator
 from pathlib import Path
 import re
 import tempfile
@@ -80,15 +81,33 @@ class Database:
             data_path.unlink()
             raise
 
-    def select(self, table):
+    def select(self, table, where=None):
+        """Вернуть записи; where — тройка (поле, оператор, значение)."""
         columns = self.schema(table)
+        comparison = None
+        if where is not None:
+            if len(where) != 3:
+                raise ValueError("Условие должно содержать поле, оператор и значение")
+            field, operation, value = where
+            types = {name: kind for name, kind, _ in columns}
+            if field not in types:
+                raise ValueError(f"Неизвестное поле: {field}")
+            comparisons = {"=": operator.eq, "!=": operator.ne,
+                           ">": operator.gt, "<": operator.lt,
+                           ">=": operator.ge, "<=": operator.le}
+            if operation not in comparisons:
+                raise ValueError(f"Неизвестный оператор: {operation}")
+            comparison = comparisons[operation]
+            expected = convert(value, types[field])
         rows = []
         with self._file(table, "csv").open(encoding="utf-8", newline="") as file:
             for values in csv.reader(file):
                 if len(values) != len(columns):
                     raise ValueError(f"Повреждены данные таблицы {table}")
-                rows.append({name: convert(value, kind)
-                             for (name, kind, _), value in zip(columns, values)})
+                row = {name: convert(value, kind)
+                       for (name, kind, _), value in zip(columns, values)}
+                if comparison is None or comparison(row[field], expected):
+                    rows.append(row)
         return rows
 
     def insert(self, table, values):

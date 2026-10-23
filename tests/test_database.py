@@ -76,6 +76,37 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(list(self.db.path.glob("*.tmp")), [])
 
+    def test_select_numeric_comparisons(self):
+        self.db.insert_many("items", [
+            ["1", "first", "0.1"], ["2", "second", "0.5"],
+            ["10", "third", "0.9"]])
+        cases = {"=": [2], "!=": [1, 10], ">": [10], "<": [1],
+                 ">=": [2, 10], "<=": [1, 2]}
+        for operation, expected in cases.items():
+            with self.subTest(operation=operation):
+                rows = self.db.select("items", ("id", operation, "2"))
+                self.assertEqual([row["id"] for row in rows], expected)
+        self.assertEqual([row["id"] for row in self.db.select(
+            "items", ("score", ">", "0.5"))], [10])
+
+    def test_select_string_and_no_matches_does_not_change_file(self):
+        self.db.insert_many("items", [["1", "Два слова", "0.1"],
+                                      ["2", "два слова", "0.2"]])
+        path = self.db.path / "items.csv"
+        original = path.read_bytes()
+        self.assertEqual([row["id"] for row in self.db.select(
+            "items", ("name", "=", "Два слова"))], [1])
+        self.assertEqual(self.db.select("items", ("id", ">", "100")), [])
+        self.assertEqual(len(self.db.select("items")), 2)
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_invalid_select_filter_rejected_even_on_empty_table(self):
+        for condition in (("unknown", "=", "1"), ("id", "==", "1"),
+                          ("id", "=", "bad"), ("score", ">", "nan"),
+                          ("id", "=")):
+            with self.subTest(condition=condition), self.assertRaises(ValueError):
+                self.db.select("items", condition)
+
     def test_table_name_cannot_escape_database_directory(self):
         with self.assertRaises(ValueError):
             self.db.create("../outside", ["id:INT:PK"])

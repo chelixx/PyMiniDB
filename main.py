@@ -11,10 +11,12 @@ HELP = """Команды:
   tables                             Список таблиц
   insert ТАБЛИЦА ЗНАЧЕНИЕ ...         Добавить запись в порядке полей
   insert_many ТАБЛИЦА ЗНАЧЕНИЯ ...    Добавить несколько записей подряд
-  select ТАБЛИЦА                     Показать все записи
+  select ТАБЛИЦА [where ПОЛЕ ОП ЗНАЧЕНИЕ]  Показать записи с фильтром
   help                               Справка
   exit                               Выход
 Типы: INT, STRING, FLOAT. Строки с пробелами заключайте в кавычки.
+Фильтр: =, !=, >, <, >=, <=. Ставьте пробелы вокруг оператора.
+Пример: select datasets where size >= 1000
 Пример: create datasets id:INT:PK name:STRING task:STRING size:INT
 """
 
@@ -73,9 +75,17 @@ def main():
                            for start in range(0, len(values), width)]
                 added = database.insert_many(table, records)
                 print(f"Добавлено записей: {len(added)}")
-            elif command == "select" and len(args) == 1:
+            elif command == "select":
+                if len(args) == 1:
+                    where = None
+                elif len(args) == 5 and args[1].lower() == "where":
+                    where = tuple(args[2:])
+                else:
+                    raise ValueError(
+                        "Использование: select ТАБЛИЦА [where ПОЛЕ ОП ЗНАЧЕНИЕ]. "
+                        "Ставьте пробелы вокруг оператора")
                 columns = [column[0] for column in database.schema(args[0])]
-                show_rows(columns, database.select(args[0]))
+                show_rows(columns, database.select(args[0], where=where))
             else:
                 raise ValueError("Неверные аргументы. Введите help")
         except (EOFError, KeyboardInterrupt):
