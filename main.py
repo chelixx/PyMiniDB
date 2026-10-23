@@ -10,13 +10,16 @@ HELP = """Команды:
   create ТАБЛИЦА ПОЛЕ:ТИП:PK ...      Создать таблицу с одним PRIMARY KEY
   tables                             Список таблиц
   insert ТАБЛИЦА ЗНАЧЕНИЕ ...         Добавить запись в порядке полей
-  insert_many ТАБЛИЦА ЗНАЧЕНИЯ ...    Добавить несколько записей подряд
+  insert_many ТАБЛИЦА [--auto-id] ЗНАЧЕНИЯ ...  Добавить несколько записей
   select ТАБЛИЦА [where ПОЛЕ ОП ЗНАЧЕНИЕ]  Показать записи с фильтром
   update ТАБЛИЦА set ПОЛЕ ЗНАЧЕНИЕ [where ПОЛЕ ОП ЗНАЧЕНИЕ]
   delete ТАБЛИЦА [where ПОЛЕ ОП ЗНАЧЕНИЕ]
   help                               Справка
   exit                               Выход
 Типы: INT, STRING, FLOAT. Строки с пробелами заключайте в кавычки.
+Авто-ID для id:INT:PK: в insert опустите ID; в insert_many укажите --auto-id.
+ID = максимум текущих и ручных ID пакета + 1 (начиная с 1).
+После удаления максимального ID его номер может использоваться снова.
 Фильтр: =, !=, >, <, >=, <=. Ставьте пробелы вокруг оператора.
 Пример: select datasets where size >= 1000
 Пример: create datasets id:INT:PK name:STRING task:STRING size:INT
@@ -71,13 +74,23 @@ def main():
                 print("Таблица создана")
             elif command == "tables" and not args:
                 print("\n".join(database.tables()) or "Таблиц пока нет")
-            elif command == "insert" and len(args) >= 2:
-                database.insert(args[0], args[1:])
-                print("Запись добавлена")
+            elif command == "insert" and args:
+                added = database.insert(args[0], args[1:])
+                key = next(name for name, _, marker in database.schema(args[0])
+                           if marker == "PK")
+                print(f"Запись добавлена ({key}={added[key]})")
             elif command == "insert_many" and len(args) >= 2:
                 table, *values = args
-                width = len(database.schema(table))
-                if len(values) % width:
+                columns = database.schema(table)
+                width = len(columns)
+                if values and values[0] == "--auto-id":
+                    if ("id", "INT", "PK") not in columns:
+                        raise ValueError("Авто-ID требует поле id:INT:PK")
+                    values = values[1:]
+                    width -= 1
+                    if width == 0:
+                        raise ValueError("Для таблицы только с ID используйте insert ТАБЛИЦА")
+                if not values or len(values) % width:
                     raise ValueError(
                         f"Для каждой записи нужно {width} значений; "
                         f"получено всего: {len(values)}")

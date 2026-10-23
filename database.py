@@ -127,23 +127,40 @@ class Database:
         columns = self.schema(table)
         existing = self.select(table)
         key = next(name for name, _, marker in columns if marker == "PK")
-        keys = {row[key] for row in existing}
+        auto_id = ("id", "INT", "PK") in columns
         rows = []
         for index, values in enumerate(records, start=1):
             try:
-                if len(values) != len(columns):
+                if len(values) == len(columns):
+                    fields = columns
+                elif auto_id and len(values) == len(columns) - 1:
+                    fields = [column for column in columns if column[0] != "id"]
+                else:
                     raise ValueError(
-                        f"Ожидается значений: {len(columns)}, получено: {len(values)}")
+                        f"Ожидается значений: {len(columns)}"
+                        + (f" или {len(columns) - 1} без ID" if auto_id else "")
+                        + f", получено: {len(values)}")
                 row = {name: convert(value, kind)
-                       for (name, kind, _), value in zip(columns, values)}
-                if row[key] in keys:
-                    raise ValueError(f"PRIMARY KEY {key}={row[key]} уже существует")
-                keys.add(row[key])
+                       for (name, kind, _), value in zip(fields, values)}
                 rows.append(row)
             except ValueError as error:
                 raise ValueError(f"Запись {index}: {error}") from None
         if not rows:
             raise ValueError("Не переданы записи для добавления")
+
+        keys = {row[key] for row in existing}
+        if auto_id:
+            # Ручные ID всего пакета учитываются до назначения автоматических.
+            reserved = keys | {row[key] for row in rows if key in row}
+            next_id = max(reserved | {0}) + 1
+        for index, row in enumerate(rows, start=1):
+            if auto_id and key not in row:
+                row[key] = next_id
+                next_id += 1
+            if row[key] in keys:
+                raise ValueError(
+                    f"Запись {index}: PRIMARY KEY {key}={row[key]} уже существует")
+            keys.add(row[key])
 
         self._write_rows(table, columns, existing + rows)
         return rows
