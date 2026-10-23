@@ -81,24 +81,28 @@ class Database:
             data_path.unlink()
             raise
 
+    def _predicate(self, columns, where):
+        if where is None:
+            return lambda row: True
+        if len(where) != 3:
+            raise ValueError("Условие должно содержать поле, оператор и значение")
+        field, operation, value = where
+        types = {name: kind for name, kind, _ in columns}
+        if field not in types:
+            raise ValueError(f"Неизвестное поле: {field}")
+        comparisons = {"=": operator.eq, "!=": operator.ne,
+                       ">": operator.gt, "<": operator.lt,
+                       ">=": operator.ge, "<=": operator.le}
+        if operation not in comparisons:
+            raise ValueError(f"Неизвестный оператор: {operation}")
+        comparison = comparisons[operation]
+        expected = convert(value, types[field])
+        return lambda row: comparison(row[field], expected)
+
     def select(self, table, where=None):
         """Вернуть записи; where — тройка (поле, оператор, значение)."""
         columns = self.schema(table)
-        comparison = None
-        if where is not None:
-            if len(where) != 3:
-                raise ValueError("Условие должно содержать поле, оператор и значение")
-            field, operation, value = where
-            types = {name: kind for name, kind, _ in columns}
-            if field not in types:
-                raise ValueError(f"Неизвестное поле: {field}")
-            comparisons = {"=": operator.eq, "!=": operator.ne,
-                           ">": operator.gt, "<": operator.lt,
-                           ">=": operator.ge, "<=": operator.le}
-            if operation not in comparisons:
-                raise ValueError(f"Неизвестный оператор: {operation}")
-            comparison = comparisons[operation]
-            expected = convert(value, types[field])
+        matches = self._predicate(columns, where)
         rows = []
         with self._file(table, "csv").open(encoding="utf-8", newline="") as file:
             for values in csv.reader(file):
@@ -106,7 +110,7 @@ class Database:
                     raise ValueError(f"Повреждены данные таблицы {table}")
                 row = {name: convert(value, kind)
                        for (name, kind, _), value in zip(columns, values)}
-                if comparison is None or comparison(row[field], expected):
+                if matches(row):
                     rows.append(row)
         return rows
 
@@ -136,6 +140,49 @@ class Database:
         if not rows:
             raise ValueError("Не переданы записи для добавления")
 
+        self._write_rows(table, columns, existing + rows)
+        return rows
+
+    def update(self, table, changes, where=None):
+        """Изменить поля подходящих записей; вернуть их количество."""
+        columns = self.schema(table)
+        matches = self._predicate(columns, where)
+        types = {name: kind for name, kind, _ in columns}
+        if not changes:
+            raise ValueError("Не указаны поля для изменения")
+        converted = {}
+        for name, value in changes.items():
+            if name not in types:
+                raise ValueError(f"Неизвестное поле: {name}")
+            converted[name] = convert(value, types[name])
+        rows = self.select(table)
+        count = 0
+        for row in rows:
+            if matches(row):
+                row.update(converted)
+                count += 1
+        key = next(name for name, _, marker in columns if marker == "PK")
+        keys = set()
+        for row in rows:
+            if row[key] in keys:
+                raise ValueError(f"PRIMARY KEY {key}={row[key]} уже существует")
+            keys.add(row[key])
+        if count:
+            self._write_rows(table, columns, rows)
+        return count
+
+    def delete(self, table, where=None):
+        """Удалить подходящие записи; вернуть их количество."""
+        columns = self.schema(table)
+        matches = self._predicate(columns, where)
+        rows = self.select(table)
+        remaining = [row for row in rows if not matches(row)]
+        count = len(rows) - len(remaining)
+        if count:
+            self._write_rows(table, columns, remaining)
+        return count
+
+    def _write_rows(self, table, columns, rows):
         # Временный файл в папке базы: ошибка записи не изменит исходный файл.
         temporary_path = None
         try:
@@ -144,12 +191,9 @@ class Database:
                     prefix=f".{table}_", suffix=".tmp", delete=False) as file:
                 temporary_path = Path(file.name)
                 writer = csv.writer(file)
-                for row in existing:
-                    writer.writerow([row[name] for name, _, _ in columns])
                 for row in rows:
                     writer.writerow([row[name] for name, _, _ in columns])
             temporary_path.replace(self._file(table, "csv"))
         finally:
             if temporary_path is not None and temporary_path.exists():
                 temporary_path.unlink()
-        return rows

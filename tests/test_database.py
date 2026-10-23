@@ -107,6 +107,71 @@ class DatabaseTests(unittest.TestCase):
             with self.subTest(condition=condition), self.assertRaises(ValueError):
                 self.db.select("items", condition)
 
+    def test_update_and_delete_persist_after_reopen(self):
+        self.db.insert_many("items", [["1", "first", "0.1"],
+                                      ["2", "second", "0.2"], ["3", "third", "0.3"]])
+        self.assertEqual(self.db.update(
+            "items", {"name": 'Новое, "имя"\nстрока', "score": "0.9"},
+            ("id", ">=", "2")), 2)
+        self.assertEqual(self.db.delete("items", ("score", "<", "0.5")), 1)
+        rows = Database(self.directory.name).select("items")
+        self.assertEqual([row["id"] for row in rows], [2, 3])
+        self.assertTrue(all(row["score"] == 0.9 for row in rows))
+        self.assertEqual(rows[0]["name"], 'Новое, "имя"\nстрока')
+
+    def test_update_primary_key_and_reject_duplicates_atomically(self):
+        self.db.insert_many("items", [["1", "first", "0.1"], ["2", "second", "0.2"]])
+        self.assertEqual(self.db.update("items", {"id": "10"}, ("id", "=", "1")), 1)
+        path = self.db.path / "items.csv"
+        original = path.read_bytes()
+        for changes, where in (({"id": "02"}, ("id", "=", "10")),
+                               ({"id": "99"}, None)):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.db.update("items", changes, where)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_update_delete_all_and_no_matches(self):
+        self.db.insert_many("items", [["1", "first", "0.1"], ["2", "second", "0.2"]])
+        self.assertEqual(self.db.update("items", {"score": "0.8"}), 2)
+        with patch.object(self.db, "_write_rows") as write:
+            self.assertEqual(self.db.update("items", {"score": "0.1"},
+                                            ("id", "=", "99")), 0)
+            self.assertEqual(self.db.delete("items", ("id", "=", "99")), 0)
+            write.assert_not_called()
+        self.assertEqual(self.db.delete("items"), 2)
+        self.assertEqual(Database(self.directory.name).select("items"), [])
+        self.assertIn("items", self.db.tables())
+        self.db.insert("items", ["1", "reused", "1"])
+
+    def test_invalid_mutations_do_not_change_data_even_without_matches(self):
+        for populated in (False, True):
+            if populated:
+                self.db.insert("items", ["1", "saved", "0.1"])
+            original = (self.db.path / "items.csv").read_bytes()
+            for changes in ({"missing": "1"}, {"score": "nan"}, {"id": "bad"}, {}):
+                with self.subTest(changes=changes, populated=populated):
+                    with self.assertRaises(ValueError):
+                        self.db.update("items", changes, ("id", "=", "99"))
+            for where in (("missing", "=", "1"), ("id", "==", "1"),
+                          ("id", "=", "bad")):
+                with self.assertRaises(ValueError):
+                    self.db.update("items", {"name": "new"}, where)
+                with self.assertRaises(ValueError):
+                    self.db.delete("items", where)
+            self.assertEqual((self.db.path / "items.csv").read_bytes(), original)
+
+    def test_mutation_replace_failure_preserves_original(self):
+        self.db.insert("items", ["1", "saved", "0.1"])
+        path = self.db.path / "items.csv"
+        original = path.read_bytes()
+        with patch("database.Path.replace", side_effect=OSError("Ошибка записи")):
+            with self.assertRaises(OSError):
+                self.db.update("items", {"name": "new"})
+            with self.assertRaises(OSError):
+                self.db.delete("items")
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(list(self.db.path.glob("*.tmp")), [])
+
     def test_table_name_cannot_escape_database_directory(self):
         with self.assertRaises(ValueError):
             self.db.create("../outside", ["id:INT:PK"])

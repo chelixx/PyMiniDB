@@ -12,6 +12,8 @@ HELP = """Команды:
   insert ТАБЛИЦА ЗНАЧЕНИЕ ...         Добавить запись в порядке полей
   insert_many ТАБЛИЦА ЗНАЧЕНИЯ ...    Добавить несколько записей подряд
   select ТАБЛИЦА [where ПОЛЕ ОП ЗНАЧЕНИЕ]  Показать записи с фильтром
+  update ТАБЛИЦА set ПОЛЕ ЗНАЧЕНИЕ [where ПОЛЕ ОП ЗНАЧЕНИЕ]
+  delete ТАБЛИЦА [where ПОЛЕ ОП ЗНАЧЕНИЕ]
   help                               Справка
   exit                               Выход
 Типы: INT, STRING, FLOAT. Строки с пробелами заключайте в кавычки.
@@ -19,6 +21,14 @@ HELP = """Команды:
 Пример: select datasets where size >= 1000
 Пример: create datasets id:INT:PK name:STRING task:STRING size:INT
 """
+
+
+def parse_where(tokens):
+    if not tokens:
+        return None
+    if len(tokens) == 4 and tokens[0].lower() == "where":
+        return tuple(tokens[1:])
+    raise ValueError("Условие: where ПОЛЕ ОП ЗНАЧЕНИЕ. Ставьте пробелы вокруг оператора")
 
 
 def show_rows(columns, rows):
@@ -52,7 +62,7 @@ def main():
                 database = Database(args[0])
                 print(f"Открыта база: {database.path.resolve()}")
                 continue
-            if command not in ("create", "tables", "insert", "insert_many", "select"):
+            if command not in ("create", "tables", "insert", "insert_many", "select", "update", "delete"):
                 raise ValueError("Неизвестная команда или лишние аргументы. Введите help")
             if database is None:
                 raise ValueError("Сначала откройте базу: open ПАПКА")
@@ -75,17 +85,22 @@ def main():
                            for start in range(0, len(values), width)]
                 added = database.insert_many(table, records)
                 print(f"Добавлено записей: {len(added)}")
-            elif command == "select":
-                if len(args) == 1:
-                    where = None
-                elif len(args) == 5 and args[1].lower() == "where":
-                    where = tuple(args[2:])
-                else:
-                    raise ValueError(
-                        "Использование: select ТАБЛИЦА [where ПОЛЕ ОП ЗНАЧЕНИЕ]. "
-                        "Ставьте пробелы вокруг оператора")
+            elif command == "select" and args:
+                where = parse_where(args[1:])
                 columns = [column[0] for column in database.schema(args[0])]
                 show_rows(columns, database.select(args[0], where=where))
+            elif command == "update":
+                if len(args) < 4 or args[1].lower() != "set":
+                    raise ValueError(
+                        "Использование: update ТАБЛИЦА set ПОЛЕ ЗНАЧЕНИЕ "
+                        "[where ПОЛЕ ОП ЗНАЧЕНИЕ]")
+                where = parse_where(args[4:])
+                count = database.update(args[0], {args[2]: args[3]}, where=where)
+                print(f"Изменено записей: {count}")
+            elif command == "delete" and args:
+                where = parse_where(args[1:])
+                count = database.delete(args[0], where=where)
+                print(f"Удалено записей: {count}")
             else:
                 raise ValueError("Неверные аргументы. Введите help")
         except (EOFError, KeyboardInterrupt):

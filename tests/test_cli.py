@@ -34,6 +34,44 @@ class CLITests(unittest.TestCase):
             self.assertIn('Неизвестный оператор', result.stdout)
             self.assertNotIn('Traceback', result.stderr)
 
+    def test_update_delete_and_reopen(self):
+        project = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            commands = (
+                f'open "{directory}"\n'
+                'create items id:INT:PK name:STRING score:FLOAT\n'
+                'insert_many items 1 first 0.1 2 second 0.2 3 third 0.3\n'
+                'update items SET name "Новое имя" WHERE id >= 2\n'
+                'update items set score 0.9 where id = 3\n'
+                'update items set id 2 where id = 3\n'
+                'update items set score invalid where id = 3\n'
+                'update items set name changed wher id = 3\n'
+                'delete items where id = 1\n'
+                'delete items where id = 99\n'
+                'delete items wher id = 2\n'
+                'update items\n'
+                'exit\n')
+            result = subprocess.run(
+                [sys.executable, str(project / 'main.py')], input=commands,
+                capture_output=True, text=True, check=True)
+            self.assertIn('Изменено записей: 2', result.stdout)
+            self.assertIn('Изменено записей: 1', result.stdout)
+            self.assertIn('Удалено записей: 1', result.stdout)
+            self.assertIn('Удалено записей: 0', result.stdout)
+            self.assertEqual(result.stdout.count('Ошибка:'), 5)
+            reopened = subprocess.run(
+                [sys.executable, str(project / 'main.py')],
+                input=(f'open "{directory}"\nselect items\n'
+                       'update items set score 1\ndelete items\nselect items\nexit\n'),
+                capture_output=True, text=True, check=True)
+            self.assertIn('Новое имя', reopened.stdout)
+            self.assertIn('0.9', reopened.stdout)
+            self.assertIn('Записей: 2', reopened.stdout)
+            self.assertIn('Изменено записей: 2', reopened.stdout)
+            self.assertIn('Удалено записей: 2', reopened.stdout)
+            self.assertIn('Записей: 0', reopened.stdout)
+            self.assertNotIn('Ошибка:', reopened.stdout)
+
     def test_insert_many_and_errors_then_reopen(self):
         project = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as directory:
