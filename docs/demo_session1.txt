@@ -1,0 +1,24 @@
+open data/defense
+tables
+select datasets
+select models
+select experiments
+create notes id:INT:PK text:STRING
+insert notes "Проверка CREATE и авто-ID"
+insert datasets "Защитный датасет" classification 1500
+insert models "Защитная модель" v1
+insert_many models --auto-id "Дополнительная A" v1 "Дополнительная B" v2
+insert experiments 6 6 0.95 running
+select experiments where accuracy >= 0.9
+update experiments set status completed where id = 21
+update datasets set name "Обновлённый датасет" where id = 6
+delete experiments where id = 20
+select experiments where id = 20
+insert models 1 "Дубликат PK" v1
+insert experiments 999 1 0.8 running
+insert experiments 1 999 0.8 running
+update experiments set dataset_id 999 where id = 21
+delete datasets where id = 6
+update models set id 60 where id = 6
+delete models where id = 6
+exit
