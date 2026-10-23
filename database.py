@@ -4,6 +4,7 @@ import csv
 import math
 from pathlib import Path
 import re
+import tempfile
 
 
 def check_name(name):
@@ -91,14 +92,45 @@ class Database:
         return rows
 
     def insert(self, table, values):
+        return self.insert_many(table, [values])[0]
+
+    def insert_many(self, table, records):
+        """Проверить весь пакет и сохранить его одной заменой файла."""
         columns = self.schema(table)
-        if len(values) != len(columns):
-            raise ValueError(f"Ожидается значений: {len(columns)}, получено: {len(values)}")
-        row = {name: convert(value, kind)
-               for (name, kind, _), value in zip(columns, values)}
+        existing = self.select(table)
         key = next(name for name, _, marker in columns if marker == "PK")
-        if any(existing[key] == row[key] for existing in self.select(table)):
-            raise ValueError(f"PRIMARY KEY {key}={row[key]} уже существует")
-        with self._file(table, "csv").open("a", encoding="utf-8", newline="") as file:
-            csv.writer(file).writerow(row.values())
-        return row
+        keys = {row[key] for row in existing}
+        rows = []
+        for index, values in enumerate(records, start=1):
+            try:
+                if len(values) != len(columns):
+                    raise ValueError(
+                        f"Ожидается значений: {len(columns)}, получено: {len(values)}")
+                row = {name: convert(value, kind)
+                       for (name, kind, _), value in zip(columns, values)}
+                if row[key] in keys:
+                    raise ValueError(f"PRIMARY KEY {key}={row[key]} уже существует")
+                keys.add(row[key])
+                rows.append(row)
+            except ValueError as error:
+                raise ValueError(f"Запись {index}: {error}") from None
+        if not rows:
+            raise ValueError("Не переданы записи для добавления")
+
+        # Временный файл в папке базы: ошибка записи не изменит исходный файл.
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", newline="", dir=self.path,
+                    prefix=f".{table}_", suffix=".tmp", delete=False) as file:
+                temporary_path = Path(file.name)
+                writer = csv.writer(file)
+                for row in existing:
+                    writer.writerow([row[name] for name, _, _ in columns])
+                for row in rows:
+                    writer.writerow([row[name] for name, _, _ in columns])
+            temporary_path.replace(self._file(table, "csv"))
+        finally:
+            if temporary_path is not None and temporary_path.exists():
+                temporary_path.unlink()
+        return rows

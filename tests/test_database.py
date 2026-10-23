@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from database import Database
 
@@ -40,6 +41,40 @@ class DatabaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.db.create("items", ["id:INT:PK"])
         self.assertEqual(self.db.select("items")[0]["name"], "saved")
+
+    def test_insert_many_persists_all_rows(self):
+        self.db.insert("items", ["1", "existing", "1"])
+        rows = self.db.insert_many("items", [
+            ["2", 'Текст, "кавычки"\nстрока', "0.2"], ["3", "third", "0.3"]])
+        reopened = Database(self.directory.name).select("items")
+        self.assertEqual([row["id"] for row in reopened], [1, 2, 3])
+        self.assertEqual(reopened[1:], rows)
+
+    def test_invalid_batch_leaves_file_unchanged(self):
+        self.db.insert("items", ["1", "existing", "1"])
+        path = self.db.path / "items.csv"
+        original = path.read_bytes()
+        invalid_batches = [
+            [["2", "valid", "2"], ["1", "existing duplicate", "3"]],
+            [["2", "valid", "2"], ["02", "batch duplicate", "3"]],
+            [["2", "valid", "2"], ["3", "invalid", "bad float"]],
+            [["2", "valid", "2"], ["3", "missing field"]],
+            [],
+        ]
+        for batch in invalid_batches:
+            with self.subTest(batch=batch), self.assertRaises(ValueError):
+                self.db.insert_many("items", batch)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_failed_replace_preserves_data_and_removes_temporary_file(self):
+        self.db.insert("items", ["1", "existing", "1"])
+        path = self.db.path / "items.csv"
+        original = path.read_bytes()
+        with patch("database.Path.replace", side_effect=OSError("Ошибка записи")):
+            with self.assertRaises(OSError):
+                self.db.insert_many("items", [["2", "new", "2"]])
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(list(self.db.path.glob("*.tmp")), [])
 
     def test_table_name_cannot_escape_database_directory(self):
         with self.assertRaises(ValueError):

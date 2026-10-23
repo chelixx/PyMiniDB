@@ -18,6 +18,7 @@ create models id:INT:PK name:STRING version:STRING
 create experiments id:INT:PK dataset_id:INT model_id:INT accuracy:FLOAT status:STRING
 insert datasets 1 "Тестовый датасет" classification 1000
 insert models 1 "Simple Model" v1
+insert_many models 1 "Модель A" v1 2 "Модель B" v2 3 "Модель C" v1
 insert experiments 1 1 1 0.91 completed
 tables
 select datasets
