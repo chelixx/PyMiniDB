@@ -1,0 +1,8 @@
+open data/defense
+select notes
+select datasets where id = 6
+select models where id = 6
+select experiments where id = 21
+select experiments where id = 20
+select experiments
+exit

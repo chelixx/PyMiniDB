@@ -1,0 +1,5 @@
+1,Изображения,classification,1000
+2,Отзывы,classification,2500
+3,Цены квартир,regression,800
+4,Новости,classification,5000
+5,Показания датчиков,regression,1200

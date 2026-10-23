@@ -1,0 +1,4 @@
+id,INT,PK
+name,STRING,
+task,STRING,
+size,INT,
