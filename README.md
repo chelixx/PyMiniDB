@@ -18,7 +18,7 @@ create models id:INT:PK name:STRING version:STRING
 create experiments id:INT:PK dataset_id:INT model_id:INT accuracy:FLOAT status:STRING
 insert datasets 1 "Тестовый датасет" classification 1000
 insert models 1 "Simple Model" v1
-insert_many models 1 "Модель A" v1 2 "Модель B" v2 3 "Модель C" v1
+insert_many models 2 "Модель A" v1 3 "Модель B" v2 4 "Модель C" v1
 insert experiments 1 1 1 0.91 completed
 tables
 select datasets
@@ -41,7 +41,7 @@ exit
 - `<таблица>.csv` — значения записей без заголовка; кавычки, запятые и переносы
   строк обрабатывает стандартный модуль `csv`.
 
-Это начальный этап, а не выполнение всего ТЗ. Пока нет автоматических ID, проверки внешних ключей, JOIN и индексов.
+Это начальный этап, а не выполнение всего ТЗ. Пока нет автоматических ID, JOIN и индексов.
 Работа с одной базой из нескольких процессов одновременно не поддерживается.
 
 Проверки: `python3 -m unittest discover -s tests -v`.

@@ -29,6 +29,10 @@ def convert(value, kind):
     raise ValueError(f"Неизвестный тип: {kind}")
 
 
+# Связи из ТЗ фиксированы: отдельный синтаксис объявления FK не нужен.
+FOREIGN_KEYS = {"dataset_id": "datasets", "model_id": "models"}
+
+
 class Database:
     def __init__(self, path):
         self.path = Path(path).expanduser()
@@ -71,6 +75,7 @@ class Database:
             columns.append((name, kind, "PK" if primary else ""))
         if not columns or sum(column[2] == "PK" for column in columns) != 1:
             raise ValueError("Укажите ровно один PRIMARY KEY через :PK")
+        self._check_relation_schema(table, columns)
         # Создание файлов только после проверки всей схемы.
         with data_path.open("x", encoding="utf-8", newline=""):
             pass
@@ -182,7 +187,46 @@ class Database:
             self._write_rows(table, columns, remaining)
         return count
 
+    def _check_relation_schema(self, table, columns):
+        if table not in ("datasets", "models", "experiments"):
+            return
+        fields = {name: (kind, marker) for name, kind, marker in columns}
+        if fields.get("id") != ("INT", "PK"):
+            raise ValueError(f"Таблица {table}: требуется поле id:INT:PK")
+        if table == "experiments":
+            for field in FOREIGN_KEYS:
+                if field not in fields or fields[field][0] != "INT":
+                    raise ValueError(f"Таблица experiments: требуется поле {field}:INT")
+
+    def _check_links(self, table, rows):
+        """Проверить связи для итогового состояния изменяемой таблицы."""
+        if table not in ("datasets", "models", "experiments"):
+            return
+        self._check_relation_schema(table, self.schema(table))
+        if table == "experiments":
+            if not rows:
+                return
+            for field, parent in FOREIGN_KEYS.items():
+                self._check_relation_schema(parent, self.schema(parent))
+                parent_ids = {row["id"] for row in self.select(parent)}
+                for row in rows:
+                    if row[field] not in parent_ids:
+                        raise ValueError(
+                            f"Неверный FK: experiments.{field}={row[field]} — "
+                            f"нет записи в {parent}.id (experiment id={row['id']})")
+        elif self._file("experiments", "schema").exists():
+            self._check_relation_schema("experiments", self.schema("experiments"))
+            field = next(field for field, parent in FOREIGN_KEYS.items() if parent == table)
+            parent_ids = {row["id"] for row in rows}
+            for experiment in self.select("experiments"):
+                if experiment[field] not in parent_ids:
+                    raise ValueError(
+                        f"Нельзя удалить или изменить ID в {table}: "
+                        f"experiment id={experiment['id']} ссылается на "
+                        f"{table}.id={experiment[field]}")
+
     def _write_rows(self, table, columns, rows):
+        self._check_links(table, rows)
         # Временный файл в папке базы: ошибка записи не изменит исходный файл.
         temporary_path = None
         try:
