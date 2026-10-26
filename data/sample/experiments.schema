@@ -1,5 +1,0 @@
-id,INT,PK
-dataset_id,INT,
-model_id,INT,
-accuracy,FLOAT,
-status,STRING,

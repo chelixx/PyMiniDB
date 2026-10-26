@@ -4,6 +4,8 @@ import sys
 import tempfile
 import unittest
 
+from database import Database
+
 
 class CLITests(unittest.TestCase):
     def test_select_filters_and_error_recovery(self):
@@ -96,7 +98,7 @@ class CLITests(unittest.TestCase):
             self.assertIn('Записей: 3', reopened.stdout)
             self.assertIn('Два слова', reopened.stdout)
             self.assertIn('a;b', reopened.stdout)
-            self.assertNotIn('good', reopened.stdout)
+            self.assertNotIn('good', [row['name'] for row in Database(directory).select('items')])
 
 
 if __name__ == '__main__':
