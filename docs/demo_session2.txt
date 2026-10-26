@@ -1,4 +1,4 @@
-open data/defense
+open demo
 select notes
 select datasets where id = 6
 select models where id = 6
